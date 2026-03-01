@@ -410,8 +410,8 @@ float LeviathexInstantMixerAudioProcessorEditor::angleToKnobValue (float angle) 
 
 void LeviathexInstantMixerAudioProcessorEditor::updateKnobFromMouse (int knobIndex, int mouseY)
 {
-    // Mix knob: standard sensitivity; IN/OUT knobs: more sensitive (fewer pixels per unit)
-    float pixelsPerValue = (knobIndex == MixKnob) ? 100.0f : 50.0f;
+    // All knobs: high sensitivity — fewer pixels needed to traverse full range
+    float pixelsPerValue = (knobIndex == MixKnob) ? 30.0f : 20.0f;
     float delta = (dragStartY - mouseY) / pixelsPerValue;
     float newValue = dragStartValue + delta;
     knobs[knobIndex]->setValue (juce::jlimit (0.0f, 100.0f, newValue));

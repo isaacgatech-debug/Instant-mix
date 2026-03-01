@@ -108,8 +108,8 @@ private:
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> inputGainSmoother;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> outputGainSmoother;
     
-    // DSP state per channel (Max 2 for stereo)
-    std::array<BiquadState, 2> eqStates;
+    // DSP state: [channel][band] — each of 6 EQ bands needs its own state per channel
+    std::array<std::array<BiquadState, 6>, 2> eqStates;
     std::array<CompressorState, 2> compressorStates;
     
     // Stereo-linked compressor envelope

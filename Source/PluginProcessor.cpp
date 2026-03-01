@@ -91,8 +91,9 @@ void LeviathexInstantMixerAudioProcessor::prepareToPlay (double sampleRate, int 
     outputGainSmoother.reset (currentSampleRate, 0.005);
     
     // Reset all states
-    for (auto& state : eqStates)
-        state.reset();
+    for (auto& chStates : eqStates)
+        for (auto& state : chStates)
+            state.reset();
     for (auto& state : compressorStates)
         state.reset();
     linkedEnvelope = 0.0f;
@@ -192,12 +193,9 @@ void LeviathexInstantMixerAudioProcessor::processBlock (juce::AudioBuffer<float>
                 // 2. API 2500-modeled compressor (stereo-linked, feed-forward RMS)
                 applyCompressor (x, mixAmt, instrument);
                 
-                // 3. EQ (6 bands)
+                // 3. EQ (6 bands) — each band has its own state [channel][band]
                 for (int stage = 0; stage < 6; ++stage)
-                    processBiquad (x, eqStates[channel], eqCoeffs[stage]);
-                    
-                // 4. Global EQ compensation (-1 dB to offset sum of boosts)
-                x *= 0.891f;
+                    processBiquad (x, eqStates[channel][stage], eqCoeffs[stage]);
             }
             
             // 5. Limiter
@@ -247,31 +245,31 @@ void LeviathexInstantMixerAudioProcessor::rebuildEQ (int instrument, float mix)
 {
     switch (instrument)
     {
-        case 0: // Acoustic Guitar — 6-band Pro-Q 3-style mix curve
-            eqCoeffs[0] = calcHighPass  (80.0f,    0.707f,            currentSampleRate);        // HPF
-            eqCoeffs[1] = calcLowShelf  (200.0f,   0.707f, mix * 1.5f, currentSampleRate);       // warmth
-            eqCoeffs[2] = calcPeakingEQ (350.0f,   1.8f,   mix * -1.5f, currentSampleRate);      // mud cut
-            eqCoeffs[3] = calcPeakingEQ (5000.0f,  1.6f,   mix * 2.0f,  currentSampleRate);      // presence
-            eqCoeffs[4] = calcHighShelf (10000.0f, 0.707f, mix * 1.5f,  currentSampleRate);      // air
-            eqCoeffs[5] = calcLowPass   (18000.0f, 0.707f,              currentSampleRate);       // LPF
+        case 0: // Acoustic Guitar — gentle mix curve, max +1.5dB
+            eqCoeffs[0] = calcHighPass  (80.0f,    0.707f,             currentSampleRate);        // HPF
+            eqCoeffs[1] = calcLowShelf  (200.0f,   0.707f, mix * 1.0f,  currentSampleRate);       // warmth
+            eqCoeffs[2] = calcPeakingEQ (350.0f,   1.8f,   mix * -1.0f, currentSampleRate);       // mud cut
+            eqCoeffs[3] = calcPeakingEQ (5000.0f,  1.6f,   mix * 1.5f,  currentSampleRate);       // presence
+            eqCoeffs[4] = calcHighShelf (10000.0f, 0.707f, mix * 1.0f,  currentSampleRate);       // air
+            eqCoeffs[5] = calcLowPass   (18000.0f, 0.707f,              currentSampleRate);        // LPF
             break;
 
-        case 1: // Vocals — 6-band Pro-Q 3-style mix curve
+        case 1: // Vocals — gentle mix curve, max +1.5dB
             eqCoeffs[0] = calcHighPass  (120.0f,   0.707f,             currentSampleRate);        // HPF
-            eqCoeffs[1] = calcPeakingEQ (300.0f,   1.8f,   mix * -1.5f, currentSampleRate);      // boxy cut
-            eqCoeffs[2] = calcPeakingEQ (1000.0f,  1.4f,   mix * 1.5f,  currentSampleRate);      // body
-            eqCoeffs[3] = calcPeakingEQ (3500.0f,  1.4f,   mix * 2.0f,  currentSampleRate);      // presence
-            eqCoeffs[4] = calcHighShelf (12000.0f, 0.707f, mix * 1.5f,  currentSampleRate);      // air
-            eqCoeffs[5] = calcLowPass   (20000.0f, 0.707f,              currentSampleRate);       // LPF
+            eqCoeffs[1] = calcPeakingEQ (300.0f,   1.8f,   mix * -1.0f, currentSampleRate);       // boxy cut
+            eqCoeffs[2] = calcPeakingEQ (1000.0f,  1.4f,   mix * 1.0f,  currentSampleRate);       // body
+            eqCoeffs[3] = calcPeakingEQ (3500.0f,  1.4f,   mix * 1.5f,  currentSampleRate);       // presence
+            eqCoeffs[4] = calcHighShelf (12000.0f, 0.707f, mix * 1.0f,  currentSampleRate);       // air
+            eqCoeffs[5] = calcLowPass   (20000.0f, 0.707f,              currentSampleRate);        // LPF
             break;
 
-        case 2: // Piano/Keys — 6-band Pro-Q 3-style mix curve
+        case 2: // Piano/Keys — gentle mix curve, max +1.5dB
             eqCoeffs[0] = calcHighPass  (60.0f,    0.707f,             currentSampleRate);        // HPF
-            eqCoeffs[1] = calcLowShelf  (180.0f,   0.707f, mix * 1.5f,  currentSampleRate);      // warmth
-            eqCoeffs[2] = calcPeakingEQ (400.0f,   1.6f,   mix * -1.0f, currentSampleRate);      // mud cut
-            eqCoeffs[3] = calcPeakingEQ (2500.0f,  1.4f,   mix * 1.5f,  currentSampleRate);      // definition
-            eqCoeffs[4] = calcHighShelf (10000.0f, 0.707f, mix * 2.0f,  currentSampleRate);      // air
-            eqCoeffs[5] = calcLowPass   (20000.0f, 0.707f,              currentSampleRate);       // LPF
+            eqCoeffs[1] = calcLowShelf  (180.0f,   0.707f, mix * 1.0f,  currentSampleRate);       // warmth
+            eqCoeffs[2] = calcPeakingEQ (400.0f,   1.6f,   mix * -1.0f, currentSampleRate);       // mud cut
+            eqCoeffs[3] = calcPeakingEQ (2500.0f,  1.4f,   mix * 1.0f,  currentSampleRate);       // definition
+            eqCoeffs[4] = calcHighShelf (10000.0f, 0.707f, mix * 1.5f,  currentSampleRate);       // air
+            eqCoeffs[5] = calcLowPass   (20000.0f, 0.707f,              currentSampleRate);        // LPF
             break;
 
         default:
