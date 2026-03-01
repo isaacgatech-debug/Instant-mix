@@ -86,9 +86,13 @@ void LeviathexInstantMixerAudioProcessor::prepareToPlay (double sampleRate, int 
 {
     currentSampleRate = (float) sampleRate;
     
-    // Initialize smoothers
-    inputGainSmoother.reset (currentSampleRate, 0.005);
+    // Initialize smoothers with current param values (Linear type avoids zero-lock)
+    float initInputGain  = knobToLinear (*inputGainParam);
+    float initOutputGain = knobToLinear (*outputGainParam);
+    inputGainSmoother.reset  (currentSampleRate, 0.005);
     outputGainSmoother.reset (currentSampleRate, 0.005);
+    inputGainSmoother.setCurrentAndTargetValue  (initInputGain);
+    outputGainSmoother.setCurrentAndTargetValue (initOutputGain);
     
     // Reset all states
     for (auto& chStates : eqStates)

@@ -105,8 +105,8 @@ private:
     std::atomic<float>* instrumentParam = nullptr;
     
     // Smoothing
-    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> inputGainSmoother;
-    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> outputGainSmoother;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> inputGainSmoother;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> outputGainSmoother;
     
     // DSP state: [channel][band] — each of 6 EQ bands needs its own state per channel
     std::array<std::array<BiquadState, 6>, 2> eqStates;
