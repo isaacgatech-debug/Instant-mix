@@ -289,42 +289,45 @@ void LeviathexInstantMixerAudioProcessor::processBiquad (float& sample, BiquadSt
 
 void LeviathexInstantMixerAudioProcessor::applyCompressor (float& sample, float mix, int instrument)
 {
-    // API 2500-modeled feed-forward RMS compressor
-    // Fixed API-style parameters: 4:1, 0.3ms attack, 100ms release, hard knee
-    // Threshold set at -18 dBFS (linear: ~0.126) — active enough to catch peaks
-    // Stereo-linked: both channels share linkedEnvelope (updated every sample)
-    
+    // API 2500-modeled feed-forward compressor
+    // 4:1, 0.3ms attack, 100ms release, -18 dBFS threshold, stereo-linked envelope
     const float ratio     = 4.0f;
-    const float threshold = 0.126f;  // -18 dBFS
-    const float attackSec = 0.0003f; // 0.3 ms — API fastest
-    const float relSec    = 0.1f;    // 100 ms — API medium
+    const float threshLin = 0.126f;   // -18 dBFS
+    const float threshDb  = -18.0f;
     
-    float attCoeff = std::exp (-1.0f / (currentSampleRate * attackSec));
-    float relCoeff = std::exp (-1.0f / (currentSampleRate * relSec));
+    // Coefficients are constant — computed once per block call in practice,
+    // but cached as statics so they are only recalculated if sampleRate changes.
+    static float cachedSR = 0.0f;
+    static float attCoeff = 0.0f;
+    static float relCoeff = 0.0f;
+    if (cachedSR != currentSampleRate)
+    {
+        cachedSR  = currentSampleRate;
+        attCoeff  = std::exp (-1.0f / (currentSampleRate * 0.0003f));
+        relCoeff  = std::exp (-1.0f / (currentSampleRate * 0.1f));
+    }
     
-    // Feed-forward: detect input level
     float envIn = std::abs (sample);
+    if (! std::isfinite (envIn)) envIn = 0.0f;
     
-    // Update stereo-linked envelope
     if (envIn > linkedEnvelope)
         linkedEnvelope = attCoeff * linkedEnvelope + (1.0f - attCoeff) * envIn;
     else
         linkedEnvelope = relCoeff * linkedEnvelope + (1.0f - relCoeff) * envIn;
     
-    // Compute gain reduction in dB domain (hard knee)
     float gainReduction = 1.0f;
-    if (linkedEnvelope > threshold)
+    if (linkedEnvelope > threshLin)
     {
-        float inputDb  = 20.0f * std::log10 (linkedEnvelope + 1e-30f);
-        float threshDb = 20.0f * std::log10 (threshold);
+        float inputDb  = 20.0f * std::log10 (linkedEnvelope);
         float excessDb = inputDb - threshDb;
-        float reducDb  = excessDb * (1.0f - 1.0f / ratio);
-        // Scale reduction depth by mix amount (0 = no compression, 1 = full 4:1)
-        reducDb *= mix;
-        gainReduction = std::pow (10.0f, -reducDb / 20.0f);
+        float reducDb  = excessDb * (1.0f - 1.0f / ratio) * mix;
+        gainReduction  = juce::Decibels::decibelsToGain (-reducDb);
     }
     
     sample *= gainReduction;
+    
+    // Safety: kill any NaN/Inf that could crash the audio driver
+    if (! std::isfinite (sample)) sample = 0.0f;
 }
 
 void LeviathexInstantMixerAudioProcessor::applyLimiter (float& sample)

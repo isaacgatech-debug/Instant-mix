@@ -14,21 +14,25 @@ struct BiquadCoeffs
 
 struct BiquadState
 {
-    float z1, z2;
+    // Direct Form I: separate input (x) and output (y) delay lines
+    float x1 = 0.f, x2 = 0.f; // previous inputs
+    float y1 = 0.f, y2 = 0.f; // previous outputs
     
     void reset()
     {
-        z1 = z2 = 0.0f;
+        x1 = x2 = y1 = y2 = 0.0f;
     }
     
-    float process(float x, const BiquadCoeffs& c)
+    float process (float x, const BiquadCoeffs& c)
     {
-        float y = c.a0 * x + c.a1 * z1 + c.a2 * z2 - c.b1 * z1 - c.b2 * z2;
-        z2 = z1;
-        z1 = y;
+        float y = c.a0 * x + c.a1 * x1 + c.a2 * x2
+                            - c.b1 * y1 - c.b2 * y2;
         
         // Denormal protection
-        if (std::abs(y) < 1e-15f) y = 0.0f;
+        if (! std::isnormal (y)) y = 0.0f;
+        
+        x2 = x1;  x1 = x;
+        y2 = y1;  y1 = y;
         
         return y;
     }
