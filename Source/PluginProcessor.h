@@ -46,18 +46,6 @@ struct CompressorState
     }
 };
 
-struct GateState
-{
-    float envelope = 0.0f;
-    float gain = 1.0f;
-    
-    void reset()
-    {
-        envelope = 0.0f;
-        gain = 1.0f;
-    }
-};
-
 //==============================================================================
 class LeviathexInstantMixerAudioProcessor  : public juce::AudioProcessor
 {
@@ -123,10 +111,12 @@ private:
     // DSP state per channel (Max 2 for stereo)
     std::array<BiquadState, 2> eqStates;
     std::array<CompressorState, 2> compressorStates;
-    std::array<GateState, 2> gateStates;
     
-    // EQ coefficients (shared across channels)
-    std::array<BiquadCoeffs, 4> eqCoeffs;
+    // Stereo-linked compressor envelope
+    float linkedEnvelope = 0.0f;
+    
+    // EQ coefficients (shared across channels) — 6 bands
+    std::array<BiquadCoeffs, 6> eqCoeffs;
     
     // Cache for EQ rebuilding
     int lastBuiltInstrument = -1;
@@ -140,9 +130,7 @@ private:
     // DSP methods
     void rebuildEQ(int instrument, float mix);
     void processBiquad(float& sample, BiquadState& state, const BiquadCoeffs& coeffs);
-    void applyCompressor(float& sample, CompressorState& state, float mix, int instrument);
-    void applyGate(float& sample, GateState& state, float mix, int instrument);
-    void applySaturation(float& sample, float mix, int instrument);
+    void applyCompressor(float& sample, float mix, int instrument);
     void applyLimiter(float& sample);
     float calculateRMS(const float* buffer, int numSamples);
     

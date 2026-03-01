@@ -29,7 +29,7 @@ public:
 private:
     // Layout constants (declared first so they can be used in array sizes below)
     enum KnobIndex { MixKnob, InputKnob, OutputKnob, NumKnobs };
-    enum InstrumentIndex { Acoustic, ElectricGuitar, Vocals, Bass, Piano, Drums, NumInstruments };
+    enum InstrumentIndex { Acoustic, Vocals, Piano, NumInstruments };
 
     // Reference to processor
     LeviathexInstantMixerAudioProcessor& audioProcessor;

@@ -21,7 +21,7 @@ LeviathexInstantMixerAudioProcessorEditor::LeviathexInstantMixerAudioProcessorEd
     attachments[OutputKnob] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (p.parameters, "output_gain",  *knobs[OutputKnob]);
     
     // Create instrument selector buttons
-    juce::String instrumentNames[] = { "Acoustic", "El. Guitar", "Vocals", "Bass", "Piano/Keys", "Drums" };
+    juce::String instrumentNames[] = { "Acoustic", "Vocals", "Piano/Keys" };
     
     for (int i = 0; i < NumInstruments; ++i)
     {
@@ -121,21 +121,18 @@ void LeviathexInstantMixerAudioProcessorEditor::paint (juce::Graphics& g)
 
 void LeviathexInstantMixerAudioProcessorEditor::resized()
 {
-    // Layout instrument buttons (2 rows of 3)
-    int buttonWidth = 100;
-    int buttonHeight = 30;
-    int buttonSpacing = 10;
-    int totalButtonWidth = 3 * buttonWidth + 2 * buttonSpacing;
+    // Layout instrument buttons (single row of 3)
+    int buttonWidth = 110;
+    int buttonHeight = 32;
+    int buttonSpacing = 12;
+    int totalButtonWidth = NumInstruments * buttonWidth + (NumInstruments - 1) * buttonSpacing;
     int buttonX = (getWidth() - totalButtonWidth) / 2;
     int buttonY = 80;
     
     for (int i = 0; i < NumInstruments; ++i)
     {
-        int row = i / 3;
-        int col = i % 3;
-        int x = buttonX + col * (buttonWidth + buttonSpacing);
-        int y = buttonY + row * (buttonHeight + buttonSpacing);
-        instrumentButtons[i]->setBounds (x, y, buttonWidth, buttonHeight);
+        int x = buttonX + i * (buttonWidth + buttonSpacing);
+        instrumentButtons[i]->setBounds (x, buttonY, buttonWidth, buttonHeight);
     }
     
     // Layout bypass button (top right)
@@ -270,13 +267,10 @@ juce::Colour LeviathexInstantMixerAudioProcessorEditor::getInstrumentColor (int 
 {
     switch (instrument)
     {
-        case Acoustic:      return juce::Colour (210, 140, 50);   // Amber
-        case ElectricGuitar:return juce::Colour (60, 180, 220);   // Electric blue
-        case Vocals:        return juce::Colour (200, 80, 160);   // Pink/rose
-        case Bass:          return juce::Colour (60, 200, 130);   // Teal/green
-        case Piano:         return juce::Colour (160, 120, 220);  // Purple
-        case Drums:         return juce::Colour (220, 80, 80);    // Red/orange
-        default:            return juce::Colours::grey;
+        case Acoustic: return juce::Colour (210, 140, 50);   // Amber
+        case Vocals:   return juce::Colour (200, 80, 160);   // Pink/rose
+        case Piano:    return juce::Colour (160, 120, 220);  // Purple
+        default:       return juce::Colours::grey;
     }
 }
 
@@ -284,20 +278,10 @@ juce::String LeviathexInstantMixerAudioProcessorEditor::getInstrumentDetail (int
 {
     switch (instrument)
     {
-        case Acoustic:
-            return "Gate · Optical comp · 4kHz presence · Air shelf";
-        case ElectricGuitar:
-            return "Gate · 4:1 comp · Box cut · Presence · Air";
-        case Vocals:
-            return "Gate · 4:1 optical · 3kHz presence · De-ess region";
-        case Bass:
-            return "Gate · 4.5:1 comp · Low punch · Mud cut · LP filter";
-        case Piano:
-            return "Gate · 3:1 comp · Low warmth · Presence · Air";
-        case Drums:
-            return "Transient gate · 6:1 fast comp · Punch shelf · 5kHz crack";
-        default:
-            return "";
+        case Acoustic: return "API 2500 comp · Warmth shelf · Mud cut · 5kHz presence · Air shelf";
+        case Vocals:   return "API 2500 comp · Boxy cut · Body · 3.5kHz presence · Air shelf";
+        case Piano:    return "API 2500 comp · Warmth shelf · Mud cut · 2.5kHz definition · Air shelf";
+        default:       return "";
     }
 }
 
@@ -426,7 +410,8 @@ float LeviathexInstantMixerAudioProcessorEditor::angleToKnobValue (float angle) 
 
 void LeviathexInstantMixerAudioProcessorEditor::updateKnobFromMouse (int knobIndex, int mouseY)
 {
-    float pixelsPerValue = 100.0f; // Sensitivity
+    // Mix knob: standard sensitivity; IN/OUT knobs: more sensitive (fewer pixels per unit)
+    float pixelsPerValue = (knobIndex == MixKnob) ? 100.0f : 50.0f;
     float delta = (dragStartY - mouseY) / pixelsPerValue;
     float newValue = dragStartValue + delta;
     knobs[knobIndex]->setValue (juce::jlimit (0.0f, 100.0f, newValue));
@@ -437,7 +422,7 @@ void LeviathexInstantMixerAudioProcessorEditor::resetKnob (int knobIndex)
     float defaultValue;
     switch (knobIndex)
     {
-        case MixKnob:    defaultValue = 50.0f; break;
+        case MixKnob:    defaultValue = 0.0f;  break;
         case InputKnob:  defaultValue = 50.0f; break;
         case OutputKnob: defaultValue = 50.0f; break;
         default:         defaultValue = 50.0f; break;

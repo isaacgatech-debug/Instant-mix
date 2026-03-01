@@ -11,7 +11,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout LeviathexInstantMixerAudioPr
     layout.add (std::make_unique<juce::AudioParameterFloat> ("mix", "Mix", 0.0f, 100.0f, 0.0f));
     layout.add (std::make_unique<juce::AudioParameterFloat> ("input_gain", "Input Gain", 0.0f, 100.0f, 50.0f));
     layout.add (std::make_unique<juce::AudioParameterFloat> ("output_gain", "Output Gain", 0.0f, 100.0f, 50.0f));
-    layout.add (std::make_unique<juce::AudioParameterInt> ("instrument", "Instrument", 0, 5, 0));
+    layout.add (std::make_unique<juce::AudioParameterInt> ("instrument", "Instrument", 0, 2, 0));
     
     return layout;
 }
@@ -95,10 +95,9 @@ void LeviathexInstantMixerAudioProcessor::prepareToPlay (double sampleRate, int 
         state.reset();
     for (auto& state : compressorStates)
         state.reset();
-    for (auto& state : gateStates)
-        state.reset();
+    linkedEnvelope = 0.0f;
     
-    // Initialize EQ coefficients
+    // Initialize EQ coefficients (identity passthrough)
     for (auto& coeffs : eqCoeffs)
     {
         coeffs.a0 = 1.0f;
@@ -106,7 +105,8 @@ void LeviathexInstantMixerAudioProcessor::prepareToPlay (double sampleRate, int 
     }
     
     // Build initial EQ
-    rebuildEQ (static_cast<int> (*instrumentParam), *mixParam / 100.0f);
+    float initMixLinear = *mixParam / 100.0f;
+    rebuildEQ (static_cast<int> (*instrumentParam), initMixLinear * initMixLinear);
 }
 
 void LeviathexInstantMixerAudioProcessor::releaseResources()
@@ -185,34 +185,26 @@ void LeviathexInstantMixerAudioProcessor::processBlock (juce::AudioBuffer<float>
             float x = channelData[sample];
             
             // 1. Input gain (smoothed)
-            float inputGain = inputGainSmoother.getNextValue();
-            x *= inputGain;
+            x *= inputGainSmoother.getNextValue();
             
             if (mixAmt > 0.0f)
             {
-                // 2. Gate
-                applyGate (x, gateStates[channel], mixAmt, instrument);
+                // 2. API 2500-modeled compressor (stereo-linked, feed-forward RMS)
+                applyCompressor (x, mixAmt, instrument);
                 
-                // 3. Compressor
-                applyCompressor (x, compressorStates[channel], mixAmt, instrument);
-                
-                // 4. Saturation
-                applySaturation (x, mixAmt, instrument);
-                
-                // 5. EQ
-                for (int stage = 0; stage < 4; ++stage)
+                // 3. EQ (6 bands)
+                for (int stage = 0; stage < 6; ++stage)
                     processBiquad (x, eqStates[channel], eqCoeffs[stage]);
                     
-                // 6. Global EQ Gain Compensation (-1dB fixed to counter sum of boosts)
+                // 4. Global EQ compensation (-1 dB to offset sum of boosts)
                 x *= 0.891f;
             }
             
-            // 7. Limiter
+            // 5. Limiter
             applyLimiter (x);
             
-            // 8. Output gain (smoothed)
-            float outputGain = outputGainSmoother.getNextValue();
-            x *= outputGain;
+            // 6. Output gain (smoothed)
+            x *= outputGainSmoother.getNextValue();
             
             channelData[sample] = x;
         }
@@ -255,46 +247,35 @@ void LeviathexInstantMixerAudioProcessor::rebuildEQ (int instrument, float mix)
 {
     switch (instrument)
     {
-        case 0: // Acoustic Guitar — max +2dB boosts
-            eqCoeffs[0] = calcHighPass (80.0f, 0.707f, currentSampleRate);
-            eqCoeffs[1] = calcPeakingEQ (4000.0f, 1.4f, mix * 2.0f, currentSampleRate);
-            eqCoeffs[2] = calcHighShelf (10000.0f, 0.707f, mix * 1.5f, currentSampleRate);
-            eqCoeffs[3] = calcLowShelf (200.0f, 0.707f, mix * 1.0f, currentSampleRate);
+        case 0: // Acoustic Guitar — 6-band Pro-Q 3-style mix curve
+            eqCoeffs[0] = calcHighPass  (80.0f,    0.707f,            currentSampleRate);        // HPF
+            eqCoeffs[1] = calcLowShelf  (200.0f,   0.707f, mix * 1.5f, currentSampleRate);       // warmth
+            eqCoeffs[2] = calcPeakingEQ (350.0f,   1.8f,   mix * -1.5f, currentSampleRate);      // mud cut
+            eqCoeffs[3] = calcPeakingEQ (5000.0f,  1.6f,   mix * 2.0f,  currentSampleRate);      // presence
+            eqCoeffs[4] = calcHighShelf (10000.0f, 0.707f, mix * 1.5f,  currentSampleRate);      // air
+            eqCoeffs[5] = calcLowPass   (18000.0f, 0.707f,              currentSampleRate);       // LPF
             break;
-            
-        case 1: // Electric Guitar — max +2dB boosts
-            eqCoeffs[0] = calcHighPass (100.0f, 0.707f, currentSampleRate);
-            eqCoeffs[1] = calcPeakingEQ (400.0f, 2.0f, mix * -2.0f, currentSampleRate);
-            eqCoeffs[2] = calcPeakingEQ (2500.0f, 1.6f, mix * 2.0f, currentSampleRate);
-            eqCoeffs[3] = calcHighShelf (8000.0f, 0.707f, mix * 1.5f, currentSampleRate);
+
+        case 1: // Vocals — 6-band Pro-Q 3-style mix curve
+            eqCoeffs[0] = calcHighPass  (120.0f,   0.707f,             currentSampleRate);        // HPF
+            eqCoeffs[1] = calcPeakingEQ (300.0f,   1.8f,   mix * -1.5f, currentSampleRate);      // boxy cut
+            eqCoeffs[2] = calcPeakingEQ (1000.0f,  1.4f,   mix * 1.5f,  currentSampleRate);      // body
+            eqCoeffs[3] = calcPeakingEQ (3500.0f,  1.4f,   mix * 2.0f,  currentSampleRate);      // presence
+            eqCoeffs[4] = calcHighShelf (12000.0f, 0.707f, mix * 1.5f,  currentSampleRate);      // air
+            eqCoeffs[5] = calcLowPass   (20000.0f, 0.707f,              currentSampleRate);       // LPF
             break;
-            
-        case 2: // Vocals — max +2dB boosts
-            eqCoeffs[0] = calcHighPass (120.0f, 0.707f, currentSampleRate);
-            eqCoeffs[1] = calcPeakingEQ (300.0f, 1.8f, mix * -1.5f, currentSampleRate);
-            eqCoeffs[2] = calcPeakingEQ (3000.0f, 1.4f, mix * 2.0f, currentSampleRate);
-            eqCoeffs[3] = calcHighShelf (12000.0f, 0.707f, mix * 1.5f, currentSampleRate);
+
+        case 2: // Piano/Keys — 6-band Pro-Q 3-style mix curve
+            eqCoeffs[0] = calcHighPass  (60.0f,    0.707f,             currentSampleRate);        // HPF
+            eqCoeffs[1] = calcLowShelf  (180.0f,   0.707f, mix * 1.5f,  currentSampleRate);      // warmth
+            eqCoeffs[2] = calcPeakingEQ (400.0f,   1.6f,   mix * -1.0f, currentSampleRate);      // mud cut
+            eqCoeffs[3] = calcPeakingEQ (2500.0f,  1.4f,   mix * 1.5f,  currentSampleRate);      // definition
+            eqCoeffs[4] = calcHighShelf (10000.0f, 0.707f, mix * 2.0f,  currentSampleRate);      // air
+            eqCoeffs[5] = calcLowPass   (20000.0f, 0.707f,              currentSampleRate);       // LPF
             break;
-            
-        case 3: // Bass — max +2dB boosts
-            eqCoeffs[0] = calcHighPass (40.0f, 0.707f, currentSampleRate);
-            eqCoeffs[1] = calcLowShelf (80.0f, 0.707f, mix * 2.0f, currentSampleRate);
-            eqCoeffs[2] = calcPeakingEQ (250.0f, 1.6f, mix * -2.0f, currentSampleRate);
-            eqCoeffs[3] = calcLowPass (8000.0f - mix * 1000.0f, 0.707f, currentSampleRate);
-            break;
-            
-        case 4: // Piano/Keys — max +2dB boosts
-            eqCoeffs[0] = calcHighPass (60.0f, 0.707f, currentSampleRate);
-            eqCoeffs[1] = calcLowShelf (200.0f, 0.707f, mix * 1.5f, currentSampleRate);
-            eqCoeffs[2] = calcPeakingEQ (1000.0f, 1.2f, mix * 1.0f, currentSampleRate);
-            eqCoeffs[3] = calcHighShelf (10000.0f, 0.707f, mix * 1.5f, currentSampleRate);
-            break;
-            
-        case 5: // Drums — max +2dB boosts
-            eqCoeffs[0] = calcHighPass (60.0f, 0.707f, currentSampleRate);
-            eqCoeffs[1] = calcLowShelf (100.0f, 0.707f, mix * 2.0f, currentSampleRate);
-            eqCoeffs[2] = calcPeakingEQ (350.0f, 2.0f, mix * -2.0f, currentSampleRate);
-            eqCoeffs[3] = calcPeakingEQ (5000.0f, 1.8f, mix * 2.0f, currentSampleRate);
+
+        default:
+            for (auto& c : eqCoeffs) { c.a0=1.f; c.a1=c.a2=c.b1=c.b2=0.f; }
             break;
     }
 }
@@ -304,161 +285,44 @@ void LeviathexInstantMixerAudioProcessor::processBiquad (float& sample, BiquadSt
     sample = state.process (sample, coeffs);
 }
 
-void LeviathexInstantMixerAudioProcessor::applyCompressor (float& sample, CompressorState& state, float mix, int instrument)
+void LeviathexInstantMixerAudioProcessor::applyCompressor (float& sample, float mix, int instrument)
 {
-    // Instrument-specific compressor settings
-    float ratio, threshold, attackSec, releaseSec;
+    // API 2500-modeled feed-forward RMS compressor
+    // Fixed API-style parameters: 4:1, 0.3ms attack, 100ms release, hard knee
+    // Threshold set at -18 dBFS (linear: ~0.126) — active enough to catch peaks
+    // Stereo-linked: both channels share linkedEnvelope (updated every sample)
     
-    switch (instrument)
-    {
-        case 0: // Acoustic Guitar
-            ratio = 1.0f + mix * 2.0f; // 1:1 to 3:1
-            threshold = 0.9f - mix * 0.55f; // 0.9 to 0.35
-            attackSec = 0.015f;
-            releaseSec = 0.2f;
-            break;
-        case 1: // Electric Guitar
-            ratio = 1.0f + mix * 3.0f; // 1:1 to 4:1
-            threshold = 0.8f - mix * 0.55f; // 0.8 to 0.25
-            attackSec = 0.005f;
-            releaseSec = 0.12f;
-            break;
-        case 2: // Vocals
-            ratio = 1.0f + mix * 3.0f; // 1:1 to 4:1
-            threshold = 0.85f - mix * 0.5f; // 0.85 to 0.35
-            attackSec = 0.02f;
-            releaseSec = 0.25f;
-            break;
-        case 3: // Bass
-            ratio = 1.0f + mix * 3.5f; // 1:1 to 4.5:1
-            threshold = 0.75f - mix * 0.5f; // 0.75 to 0.25
-            attackSec = 0.005f;
-            releaseSec = 0.1f;
-            break;
-        case 4: // Piano/Keys
-            ratio = 1.0f + mix * 2.0f; // 1:1 to 3:1
-            threshold = 0.9f - mix * 0.5f; // 0.9 to 0.4
-            attackSec = 0.03f;
-            releaseSec = 0.3f;
-            break;
-        case 5: // Drums
-            ratio = 1.0f + mix * 5.0f; // 1:1 to 6:1
-            threshold = 0.7f - mix * 0.5f; // 0.7 to 0.2
-            attackSec = 0.001f;
-            releaseSec = 0.06f;
-            break;
-        default:
-            ratio = 2.0f;
-            threshold = 0.5f;
-            attackSec = 0.01f;
-            releaseSec = 0.1f;
-            break;
-    }
+    const float ratio     = 4.0f;
+    const float threshold = 0.126f;  // -18 dBFS
+    const float attackSec = 0.0003f; // 0.3 ms — API fastest
+    const float relSec    = 0.1f;    // 100 ms — API medium
     
-    // Envelope follower
     float attCoeff = std::exp (-1.0f / (currentSampleRate * attackSec));
-    float relCoeff = std::exp (-1.0f / (currentSampleRate * releaseSec));
+    float relCoeff = std::exp (-1.0f / (currentSampleRate * relSec));
     
+    // Feed-forward: detect input level
     float envIn = std::abs (sample);
-    if (envIn > state.envelope)
-        state.envelope = attCoeff * state.envelope + (1.0f - attCoeff) * envIn;
-    else
-        state.envelope = relCoeff * state.envelope + (1.0f - relCoeff) * envIn;
     
-    // Gain reduction
-    if (state.envelope > threshold)
-    {
-        float gr = std::pow (threshold / state.envelope, 1.0f - 1.0f / ratio);
-        state.gainReduction = gr;
-    }
+    // Update stereo-linked envelope
+    if (envIn > linkedEnvelope)
+        linkedEnvelope = attCoeff * linkedEnvelope + (1.0f - attCoeff) * envIn;
     else
-    {
-        state.gainReduction = 1.0f;
-    }
+        linkedEnvelope = relCoeff * linkedEnvelope + (1.0f - relCoeff) * envIn;
     
-    // Apply gain reduction (no makeup gain — avoids pumping/distortion)
-    sample *= state.gainReduction;
-}
-
-void LeviathexInstantMixerAudioProcessor::applyGate (float& sample, GateState& state, float mix, int instrument)
-{
-    // Instrument-specific gate thresholds
-    float baseThreshold;
-    switch (instrument)
+    // Compute gain reduction in dB domain (hard knee)
+    float gainReduction = 1.0f;
+    if (linkedEnvelope > threshold)
     {
-        case 0: case 3: case 4: // Acoustic Guitar, Bass, Piano/Keys
-            baseThreshold = 0.008f;
-            break;
-        case 2: // Vocals
-            baseThreshold = 0.015f;
-            break;
-        case 1: // Electric Guitar
-            baseThreshold = 0.04f;
-            break;
-        case 5: // Drums
-            baseThreshold = 0.03f;
-            break;
-        default:
-            baseThreshold = 0.01f;
-            break;
+        float inputDb  = 20.0f * std::log10 (linkedEnvelope + 1e-30f);
+        float threshDb = 20.0f * std::log10 (threshold);
+        float excessDb = inputDb - threshDb;
+        float reducDb  = excessDb * (1.0f - 1.0f / ratio);
+        // Scale reduction depth by mix amount (0 = no compression, 1 = full 4:1)
+        reducDb *= mix;
+        gainReduction = std::pow (10.0f, -reducDb / 20.0f);
     }
     
-    float threshold = mix * baseThreshold;
-    
-    // Envelope follower (10ms attack, 80ms release)
-    float attCoeff = std::exp (-1.0f / (currentSampleRate * 0.01f));
-    float relCoeff = std::exp (-1.0f / (currentSampleRate * 0.08f));
-    
-    float envIn = std::abs (sample);
-    if (envIn > state.envelope)
-        state.envelope = attCoeff * state.envelope + (1.0f - attCoeff) * envIn;
-    else
-        state.envelope = relCoeff * state.envelope + (1.0f - relCoeff) * envIn;
-    
-    // Soft-knee gate
-    if (state.envelope < threshold)
-        state.gain = (state.envelope / threshold) * (state.envelope / threshold); // Squared for gentle knee
-    else
-        state.gain = 1.0f;
-    
-    sample *= state.gain;
-}
-
-void LeviathexInstantMixerAudioProcessor::applySaturation (float& sample, float mix, int instrument)
-{
-    // Instrument-specific drive amounts
-    float baseDrive;
-    switch (instrument)
-    {
-        case 0: // Acoustic Guitar
-            baseDrive = 0.8f;
-            break;
-        case 1: // Electric Guitar
-            baseDrive = 2.5f;
-            break;
-        case 2: // Vocals
-            baseDrive = 0.6f;
-            break;
-        case 3: // Bass
-            baseDrive = 1.2f;
-            break;
-        case 4: // Piano/Keys
-            baseDrive = 0.4f;
-            break;
-        case 5: // Drums
-            baseDrive = 1.8f;
-            break;
-        default:
-            baseDrive = 1.0f;
-            break;
-    }
-    
-    float drive = mix * baseDrive;
-    
-    // tanh waveshaper — naturally limits peaks, no makeup gain needed
-    // Drive kept gentle so it colours tone without adding loudness
-    float d = 1.0f + drive * 2.0f;
-    sample = std::tanh (sample * d) / d; // divide by d to preserve input level
+    sample *= gainReduction;
 }
 
 void LeviathexInstantMixerAudioProcessor::applyLimiter (float& sample)
