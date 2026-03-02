@@ -28,8 +28,8 @@ struct BiquadState
         float y = c.a0 * x + c.a1 * x1 + c.a2 * x2
                             - c.b1 * y1 - c.b2 * y2;
         
-        // Denormal protection
-        if (! std::isnormal (y)) y = 0.0f;
+        // Denormal/NaN protection — only kill non-finite values, zero is valid
+        if (! std::isfinite (y)) y = 0.0f;
         
         x2 = x1;  x1 = x;
         y2 = y1;  y1 = y;
