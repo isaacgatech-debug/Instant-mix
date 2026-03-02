@@ -175,8 +175,24 @@ void LeviathexInstantMixerAudioProcessor::processBlock (juce::AudioBuffer<float>
         lastBuiltMix = mixAmt;
     }
     
-    // Process each channel (capped to 2 for stereo memory safety)
+    // Pre-compute per-sample gain ramps ONCE — both channels use the same values
+    // Calling getNextValue() inside the channel loop causes L/R mismatch (static)
     int processChannels = std::min (totalNumInputChannels, 2);
+    
+    juce::AudioBuffer<float> inputGainRamp  (1, numSamples);
+    juce::AudioBuffer<float> outputGainRamp (1, numSamples);
+    juce::AudioBuffer<float> mixRamp        (1, numSamples);
+    
+    for (int i = 0; i < numSamples; ++i)
+    {
+        inputGainRamp .getWritePointer(0)[i] = inputGainSmoother.getNextValue();
+        outputGainRamp.getWritePointer(0)[i] = outputGainSmoother.getNextValue();
+        mixRamp       .getWritePointer(0)[i] = mixSmoother.getNextValue();
+    }
+    
+    const float* inGain  = inputGainRamp .getReadPointer(0);
+    const float* outGain = outputGainRamp.getReadPointer(0);
+    const float* mixVal  = mixRamp       .getReadPointer(0);
     
     for (int channel = 0; channel < processChannels; ++channel)
     {
@@ -185,7 +201,6 @@ void LeviathexInstantMixerAudioProcessor::processBlock (juce::AudioBuffer<float>
         // Calculate input levels for metering
         inputLevel[channel] = calculateRMS (channelData, numSamples);
         
-        // Find peak for metering
         float channelPeak = 0.0f;
         for (int sample = 0; sample < numSamples; ++sample)
             channelPeak = std::max (channelPeak, std::abs (channelData[sample]));
@@ -195,30 +210,27 @@ void LeviathexInstantMixerAudioProcessor::processBlock (juce::AudioBuffer<float>
         {
             float x = channelData[sample];
             
-            // 1. Input gain (smoothed)
-            x *= inputGainSmoother.getNextValue();
+            // 1. Input gain
+            x *= inGain[sample];
             
-            // Advance mix smoother only on channel 0 to avoid double-advancing
-            float smoothedMix = (channel == 0) ? mixSmoother.getNextValue()
-                                               : mixSmoother.getCurrentValue();
-            
-            if (smoothedMix > 0.0f)
+            float sm = mixVal[sample];
+            if (sm > 0.0f)
             {
-                // 2. API 2500-modeled compressor (stereo-linked, feed-forward RMS)
-                applyCompressor (x, smoothedMix, instrument);
+                // 2. Compressor
+                applyCompressor (x, sm, instrument);
                 
-                // 3. EQ (6 bands) — each band has its own state [channel][band]
+                // 3. EQ (6 bands)
                 for (int stage = 0; stage < 6; ++stage)
                     processBiquad (x, eqStates[channel][stage], eqCoeffs[stage]);
             }
             
-            // 5. Limiter
+            // 4. Limiter
             applyLimiter (x);
             
-            // 6. Output gain (smoothed)
-            x *= outputGainSmoother.getNextValue();
+            // 5. Output gain
+            x *= outGain[sample];
             
-            // 7. Final NaN/Inf brickwall — never send bad samples to driver
+            // 6. NaN/Inf brickwall
             if (! std::isfinite (x)) x = 0.0f;
             
             channelData[sample] = x;
