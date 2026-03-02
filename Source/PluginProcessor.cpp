@@ -1,8 +1,26 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <fstream>
+#include <cmath>
 
 // Define JUCE plugin macros that are missing in cmake setup
 #define JucePlugin_Name "Leviathex Instant Mixer"
+
+// ---- Debug logger (writes to ~/Desktop/lvm_debug.log) ----
+// Set to 1 to enable, 0 to disable
+#define LVM_DEBUG 1
+
+#if LVM_DEBUG
+static std::ofstream& getLog()
+{
+    static std::ofstream logFile (std::string(getenv("HOME")) + "/Desktop/lvm_debug.log", std::ios::trunc);
+    return logFile;
+}
+static int gLogSampleCount = 0;
+#define LVM_LOG(msg) do { if (gLogSampleCount < 4096) { getLog() << msg << "\n"; getLog().flush(); } } while(0)
+#else
+#define LVM_LOG(msg)
+#endif
 
 juce::AudioProcessorValueTreeState::ParameterLayout LeviathexInstantMixerAudioProcessor::createParameterLayout()
 {
@@ -161,13 +179,11 @@ void LeviathexInstantMixerAudioProcessor::processBlock (juce::AudioBuffer<float>
     inputGainSmoother.setTargetValue (inputGainLinear);
     outputGainSmoother.setTargetValue (outputGainLinear);
     
-    // Rebuild EQ if instrument or mix changed significantly
-    if (instrument != lastBuiltInstrument || std::abs (mixAmt - lastBuiltMix) > 0.005f)
-    {
-        rebuildEQ (instrument, mixAmt);
-        lastBuiltInstrument = instrument;
-        lastBuiltMix = mixAmt;
-    }
+    // Rebuild EQ on every block — coefficients update smoothly, no state reset needed
+    // Direct Form I handles coefficient changes without instability
+    rebuildEQ (instrument, mixAmt);
+    lastBuiltInstrument = instrument;
+    lastBuiltMix = mixAmt;
     
     // Process each channel (capped to 2 for stereo memory safety)
     int processChannels = std::min (totalNumInputChannels, 2);
@@ -194,12 +210,32 @@ void LeviathexInstantMixerAudioProcessor::processBlock (juce::AudioBuffer<float>
             
             if (mixAmt > 0.0f)
             {
+                float preComp = x;
                 // 2. API 2500-modeled compressor (stereo-linked, feed-forward RMS)
                 applyCompressor (x, mixAmt, instrument);
+                float postComp = x;
                 
                 // 3. EQ (6 bands) — each band has its own state [channel][band]
+                float preEQ = x;
                 for (int stage = 0; stage < 6; ++stage)
+                {
+                    float preBand = x;
                     processBiquad (x, eqStates[channel][stage], eqCoeffs[stage]);
+                    if (channel == 0 && gLogSampleCount < 4096)
+                    {
+                        if (! std::isfinite(x) || std::abs(x) > 10.0f)
+                            LVM_LOG("[BAD] sample=" << gLogSampleCount << " stage=" << stage << " in=" << preBand << " out=" << x
+                                << " a0=" << eqCoeffs[stage].a0 << " a1=" << eqCoeffs[stage].a1
+                                << " b1=" << eqCoeffs[stage].b1 << " b2=" << eqCoeffs[stage].b2);
+                    }
+                }
+                
+                if (channel == 0 && gLogSampleCount < 4096)
+                {
+                    LVM_LOG("s=" << gLogSampleCount << " mix=" << mixAmt << " preComp=" << preComp
+                        << " postComp=" << postComp << " postEQ=" << x);
+                    gLogSampleCount++;
+                }
             }
             
             // 5. Limiter
@@ -207,6 +243,9 @@ void LeviathexInstantMixerAudioProcessor::processBlock (juce::AudioBuffer<float>
             
             // 6. Output gain (smoothed)
             x *= outputGainSmoother.getNextValue();
+            
+            // 7. Final NaN/Inf brickwall — never send bad samples to driver
+            if (! std::isfinite (x)) x = 0.0f;
             
             channelData[sample] = x;
         }
