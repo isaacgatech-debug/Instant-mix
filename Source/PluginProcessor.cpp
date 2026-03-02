@@ -89,10 +89,15 @@ void LeviathexInstantMixerAudioProcessor::prepareToPlay (double sampleRate, int 
     // Initialize smoothers with current param values (Linear type avoids zero-lock)
     float initInputGain  = knobToLinear (*inputGainParam);
     float initOutputGain = knobToLinear (*outputGainParam);
+    float initMixLinear  = *mixParam / 100.0f;
+    float initMixAmt     = initMixLinear * initMixLinear;
     inputGainSmoother.reset  (currentSampleRate, 0.005);
     outputGainSmoother.reset (currentSampleRate, 0.005);
+    // Mix smoother: 80ms ramp so EQ coefficients change gradually, not instantly
+    mixSmoother.reset (currentSampleRate, 0.08);
     inputGainSmoother.setCurrentAndTargetValue  (initInputGain);
     outputGainSmoother.setCurrentAndTargetValue (initOutputGain);
+    mixSmoother.setCurrentAndTargetValue (initMixAmt);
     
     // Reset all states
     for (auto& chStates : eqStates)
@@ -110,8 +115,7 @@ void LeviathexInstantMixerAudioProcessor::prepareToPlay (double sampleRate, int 
     }
     
     // Build initial EQ
-    float initMixLinear = *mixParam / 100.0f;
-    rebuildEQ (static_cast<int> (*instrumentParam), initMixLinear * initMixLinear);
+    rebuildEQ (static_cast<int> (*instrumentParam), initMixAmt);
 }
 
 void LeviathexInstantMixerAudioProcessor::releaseResources()
@@ -149,17 +153,19 @@ void LeviathexInstantMixerAudioProcessor::processBlock (juce::AudioBuffer<float>
         buffer.clear (i, 0, numSamples);
     
     // Get current parameter values
-    // Mix knob: 0 = no processing, 100 = full processing, exponential (squared) curve
-    float mixValue = *mixParam;
+    float mixValue  = *mixParam;
     float mixLinear = mixValue / 100.0f;
-    float mixAmt = mixLinear * mixLinear; // exponential: subtle at low end, strong at top
-    int instrument = static_cast<int> (*instrumentParam);
+    float mixTarget = mixLinear * mixLinear; // exponential curve
+    int instrument  = static_cast<int> (*instrumentParam);
     
-    // Update input/output gain smoothers
-    float inputGainLinear = knobToLinear (*inputGainParam);
-    float outputGainLinear = knobToLinear (*outputGainParam);
-    inputGainSmoother.setTargetValue (inputGainLinear);
-    outputGainSmoother.setTargetValue (outputGainLinear);
+    // Update smoothers
+    inputGainSmoother.setTargetValue  (knobToLinear (*inputGainParam));
+    outputGainSmoother.setTargetValue (knobToLinear (*outputGainParam));
+    mixSmoother.setTargetValue (mixTarget);
+    
+    // Advance mixSmoother to mid-block value for EQ rebuild
+    // (smoother is also advanced per-sample inside the loop for compressor)
+    float mixAmt = mixSmoother.getTargetValue();
     
     // Rebuild EQ only when instrument or mix changes meaningfully
     if (instrument != lastBuiltInstrument || std::abs (mixAmt - lastBuiltMix) > 0.01f)
@@ -192,10 +198,14 @@ void LeviathexInstantMixerAudioProcessor::processBlock (juce::AudioBuffer<float>
             // 1. Input gain (smoothed)
             x *= inputGainSmoother.getNextValue();
             
-            if (mixAmt > 0.0f)
+            // Advance mix smoother only on channel 0 to avoid double-advancing
+            float smoothedMix = (channel == 0) ? mixSmoother.getNextValue()
+                                               : mixSmoother.getCurrentValue();
+            
+            if (smoothedMix > 0.0f)
             {
                 // 2. API 2500-modeled compressor (stereo-linked, feed-forward RMS)
-                applyCompressor (x, mixAmt, instrument);
+                applyCompressor (x, smoothedMix, instrument);
                 
                 // 3. EQ (6 bands) — each band has its own state [channel][band]
                 for (int stage = 0; stage < 6; ++stage)
