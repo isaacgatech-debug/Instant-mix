@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 #include <vector>
+#include <mutex>
 
 //==============================================================================
 struct BiquadCoeffs
@@ -47,6 +48,24 @@ struct CompressorState
     {
         envelope = 0.0f;
         gainReduction = 1.0f;
+    }
+};
+
+struct ExciterState
+{
+    // Tape-style saturation state variables
+    float dcBlockerX1 = 0.0f;
+    float dcBlockerY1 = 0.0f;
+    float preEmphasisX1 = 0.0f;
+    float preEmphasisY1 = 0.0f;
+    float deEmphasisX1 = 0.0f;
+    float deEmphasisY1 = 0.0f;
+    
+    void reset()
+    {
+        dcBlockerX1 = dcBlockerY1 = 0.0f;
+        preEmphasisX1 = preEmphasisY1 = 0.0f;
+        deEmphasisX1 = deEmphasisY1 = 0.0f;
     }
 };
 
@@ -99,6 +118,12 @@ public:
     float outputLevel[2] = { 0.0f };
     float inputPeak[2] = { 0.0f };
     float outputPeak[2] = { 0.0f };
+    std::atomic<float> gainReductionDb { 0.0f }; // Current gain reduction in dB
+    
+    // Logging system for error reporting (public for UI access)
+    void addLogMessage (const juce::String& message, const juce::String& level = "INFO");
+    juce::String getLogAsString() const;
+    void clearLog();
 
 private:
     //==============================================================================
@@ -107,18 +132,31 @@ private:
     std::atomic<float>* inputGainParam = nullptr;
     std::atomic<float>* outputGainParam = nullptr;
     std::atomic<float>* instrumentParam = nullptr;
+    std::atomic<float>* stereoWidthParam = nullptr;
+    std::atomic<float>* reverbEnabledParam = nullptr;
+    std::atomic<float>* reverbLengthParam = nullptr;
+    std::atomic<float>* reverbSendToBusParam = nullptr;
+    std::atomic<float>* autoMakeupParam = nullptr;
+    std::atomic<float>* outputTrimParam = nullptr;
     
     // Smoothing
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> inputGainSmoother;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> outputGainSmoother;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> mixSmoother;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> makeupGainSmoother;
     
     // DSP state: [channel][band] — each of 6 EQ bands needs its own state per channel
     std::array<std::array<BiquadState, 6>, 2> eqStates;
     std::array<CompressorState, 2> compressorStates;
+    std::array<ExciterState, 2> exciterStates;
     
     // Stereo-linked compressor envelope
     float linkedEnvelope = 0.0f;
+    
+    // Compressor coefficients (moved from static locals)
+    float cachedSampleRate = 0.0f;
+    float attackCoeff = 0.0f;
+    float releaseCoeff = 0.0f;
     
     // EQ coefficients (shared across channels) — 6 bands
     std::array<BiquadCoeffs, 6> eqCoeffs;
@@ -130,24 +168,55 @@ private:
     // Sample rate
     float currentSampleRate = 44100.0f;
     
+    // Pre-allocated ramp buffers (avoid heap allocation in audio thread)
+    std::vector<float> inputGainRamp;
+    std::vector<float> outputGainRamp;
+    std::vector<float> mixRamp;
+    juce::AudioBuffer<float> reverbBuffer;
+    
+    // Reverb processor
+    juce::Reverb reverbProcessor;
+    juce::Reverb::Parameters reverbParams;
+    
+    // 2x Oversampling for exciter (always-on for cleaner saturation)
+    std::unique_ptr<juce::dsp::Oversampling<float>> oversampling;
+    
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     
     // DSP methods
     void rebuildEQ(int instrument, float mix);
     void processBiquad(float& sample, BiquadState& state, const BiquadCoeffs& coeffs);
-    void applyCompressor(float& sample, float mix, int instrument);
+    void applyExciter(float& sample, ExciterState& state, float intensity);
+    void applyCompressor(float& sampleL, float& sampleR, float mix, int instrument);
     void applyLimiter(float& sample);
     float calculateRMS(const float* buffer, int numSamples);
+    void configureReverbForInstrument (int instrument, float length);
+    void processReverb (juce::AudioBuffer<float>& dryBuffer, juce::AudioBuffer<float>& reverbBuffer, int numSamples, float wetLevel);
     
-    // Biquad coefficient calculations
-    BiquadCoeffs calcHighShelf (float freq, float Q, float gain, float sampleRate);
-    BiquadCoeffs calcLowShelf (float freq, float Q, float gain, float sampleRate);
-    BiquadCoeffs calcPeakingEQ (float freq, float Q, float gain, float sampleRate);
-    BiquadCoeffs calcHighPass (float freq, float Q, float sampleRate);
-    BiquadCoeffs calcLowPass (float freq, float Q, float sampleRate);
+    // Loudness compensation
+    float currentMakeupGain = 1.0f;
+    float measuredInputLUFS = -70.0f;
+    float measuredOutputLUFS = -70.0f;
+    static constexpr int lufsWindowSize = 3; // 3 seconds for short-term LUFS
+    std::vector<float> lufsInputHistory;
+    std::vector<float> lufsOutputHistory;
+    size_t lufsHistoryIndex = 0;
+    
+    // Logging system for error reporting
+    struct LogEntry
+    {
+        juce::String timestamp;
+        juce::String level;  // INFO, WARN, ERROR
+        juce::String message;
+    };
+    std::vector<LogEntry> logEntries;
+    mutable std::mutex logMutex;
+    
+    float calculateShortTermLUFS (const float* left, const float* right, int numSamples);
+    void updateMakeupGain (float mixValue, bool autoMakeupEnabled);
     
     // Gain conversion
-    float knobToLinear(float knobValue) const;
+    float knobToLinear (float knobValue) const;
     
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LeviathexInstantMixerAudioProcessor)
 };

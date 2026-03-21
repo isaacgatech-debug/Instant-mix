@@ -1,0 +1,10 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/spadecreative/CascadeProjects/Windsurf-Projects/CascadeProjects/windsurf-project/Instant-mix/plugin_host_build/tools/cmake_install.cmake",
+		"/Users/spadecreative/CascadeProjects/Windsurf-Projects/CascadeProjects/windsurf-project/Instant-mix/plugin_host_build/tools/modules/cmake_install.cmake",
+		"/Users/spadecreative/CascadeProjects/Windsurf-Projects/CascadeProjects/windsurf-project/Instant-mix/plugin_host_build/tools/extras/Build/cmake_install.cmake",
+		"/Users/spadecreative/CascadeProjects/Windsurf-Projects/CascadeProjects/windsurf-project/Instant-mix/plugin_host_build/tools/extras/Build/juceaide/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

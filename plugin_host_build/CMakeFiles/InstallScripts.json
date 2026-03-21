@@ -1,0 +1,17 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/spadecreative/CascadeProjects/Windsurf-Projects/CascadeProjects/windsurf-project/Instant-mix/plugin_host_build/cmake_install.cmake",
+		"/Users/spadecreative/CascadeProjects/Windsurf-Projects/CascadeProjects/windsurf-project/Instant-mix/plugin_host_build/modules/cmake_install.cmake",
+		"/Users/spadecreative/CascadeProjects/Windsurf-Projects/CascadeProjects/windsurf-project/Instant-mix/plugin_host_build/extras/Build/cmake_install.cmake",
+		"/Users/spadecreative/CascadeProjects/Windsurf-Projects/CascadeProjects/windsurf-project/Instant-mix/plugin_host_build/extras/Build/juceaide/cmake_install.cmake",
+		"/Users/spadecreative/CascadeProjects/Windsurf-Projects/CascadeProjects/windsurf-project/Instant-mix/plugin_host_build/extras/cmake_install.cmake",
+		"/Users/spadecreative/CascadeProjects/Windsurf-Projects/CascadeProjects/windsurf-project/Instant-mix/plugin_host_build/extras/AudioPerformanceTest/cmake_install.cmake",
+		"/Users/spadecreative/CascadeProjects/Windsurf-Projects/CascadeProjects/windsurf-project/Instant-mix/plugin_host_build/extras/AudioPluginHost/cmake_install.cmake",
+		"/Users/spadecreative/CascadeProjects/Windsurf-Projects/CascadeProjects/windsurf-project/Instant-mix/plugin_host_build/extras/BinaryBuilder/cmake_install.cmake",
+		"/Users/spadecreative/CascadeProjects/Windsurf-Projects/CascadeProjects/windsurf-project/Instant-mix/plugin_host_build/extras/NetworkGraphicsDemo/cmake_install.cmake",
+		"/Users/spadecreative/CascadeProjects/Windsurf-Projects/CascadeProjects/windsurf-project/Instant-mix/plugin_host_build/extras/Projucer/cmake_install.cmake",
+		"/Users/spadecreative/CascadeProjects/Windsurf-Projects/CascadeProjects/windsurf-project/Instant-mix/plugin_host_build/extras/UnitTestRunner/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
